@@ -1,22 +1,23 @@
 package com.boycottpro.causecompanystats;
 
-import com.amazonaws.services.lambda.runtime.Context;
-import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
+import com.boycottpro.causecompanystats.model.IncrementForm;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
+import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemResponse;
+import software.amazon.awssdk.services.dynamodb.model.DynamoDbException;
+import com.amazonaws.services.lambda.runtime.Context;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 public class IncrementCauseCompanyStatsHandlerTest {
@@ -30,61 +31,55 @@ public class IncrementCauseCompanyStatsHandlerTest {
     @InjectMocks
     private IncrementCauseCompanyStatsHandler handler;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void testIncrementSuccess() throws Exception {
-        APIGatewayProxyRequestEvent event = new APIGatewayProxyRequestEvent();
-        event.setPathParameters(Map.of(
-                "company_id", "test_company",
-                "cause_id", "test_cause",
-                "increment", "true"
-        ));
+    public void testSuccessfulIncrement() throws Exception {
+        // Setup input
+        APIGatewayProxyRequestEvent requestEvent = new APIGatewayProxyRequestEvent();
+        requestEvent.setPathParameters(Map.of("cause_id", "c123", "company_id", "co456"));
 
-        when(dynamoDb.updateItem(any(UpdateItemRequest.class))).thenReturn(UpdateItemResponse.builder().build());
+        IncrementForm form = new IncrementForm("Some Company", "Some Cause", true);
+        requestEvent.setBody(objectMapper.writeValueAsString(form));
 
-        var response = handler.handleRequest(event, context);
+        // Mock DynamoDB behavior
+        when(dynamoDb.updateItem(any(UpdateItemRequest.class)))
+                .thenReturn(UpdateItemResponse.builder().build());
 
+        // Execute
+        APIGatewayProxyResponseEvent response = handler.handleRequest(requestEvent, context);
+
+        // Validate
         assertEquals(200, response.getStatusCode());
+        assertTrue(response.getBody().contains("\"recordUpdated\":true"));
     }
 
     @Test
-    void testMissingPathParams() {
-        APIGatewayProxyRequestEvent event = new APIGatewayProxyRequestEvent();
-        event.setPathParameters(null);
+    public void testMissingPathParams() {
+        APIGatewayProxyRequestEvent requestEvent = new APIGatewayProxyRequestEvent();
+        requestEvent.setPathParameters(null);
 
-        var response = handler.handleRequest(event, context);
+        APIGatewayProxyResponseEvent response = handler.handleRequest(requestEvent, context);
 
         assertEquals(400, response.getStatusCode());
+        assertTrue(response.getBody().contains("Invalid path parameters"));
     }
 
     @Test
-    void testInvalidIncrementValue() {
-        APIGatewayProxyRequestEvent event = new APIGatewayProxyRequestEvent();
-        event.setPathParameters(Map.of(
-                "company_id", "test_company",
-                "cause_id", "test_cause",
-                "increment", "maybe"
-        ));
+    public void testDynamoDbException() throws Exception {
+        // Setup input
+        APIGatewayProxyRequestEvent requestEvent = new APIGatewayProxyRequestEvent();
+        requestEvent.setPathParameters(Map.of("cause_id", "c789", "company_id", "co789"));
 
-        var response = handler.handleRequest(event, context);
+        IncrementForm form = new IncrementForm("Company", "Cause", false);
+        requestEvent.setBody(objectMapper.writeValueAsString(form));
 
-        assertEquals(400, response.getStatusCode());
-    }
+        when(dynamoDb.updateItem(any(UpdateItemRequest.class)))
+                .thenThrow(DynamoDbException.builder().message("DB error").build());
 
-    @Test
-    void testExceptionHandling() {
-        APIGatewayProxyRequestEvent event = new APIGatewayProxyRequestEvent();
-        event.setPathParameters(Map.of(
-                "company_id", "test_company",
-                "cause_id", "test_cause",
-                "increment", "false"
-        ));
-
-        when(dynamoDb.updateItem(any(UpdateItemRequest.class))).thenThrow(RuntimeException.class);
-
-        var response = handler.handleRequest(event, context);
+        APIGatewayProxyResponseEvent response = handler.handleRequest(requestEvent, context);
 
         assertEquals(500, response.getStatusCode());
+        assertTrue(response.getBody().contains("DB error"));
     }
 }
