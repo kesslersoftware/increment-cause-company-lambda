@@ -6,6 +6,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.boycottpro.causecompanystats.model.IncrementForm;
 import com.boycottpro.models.ResponseMessage;
+import com.boycottpro.utilities.JwtUtility;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
@@ -31,6 +32,8 @@ public class IncrementCauseCompanyStatsHandler implements RequestHandler<APIGate
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         try {
+            String sub = JwtUtility.getSubFromRestEvent(event);
+            if (sub == null) return response(401, "Unauthorized");
             Map<String, String> pathParams = event.getPathParameters();
             String causeId = pathParams != null ? pathParams.get("cause_id") : null;
             String companyId = pathParams != null ? pathParams.get("company_id") : null;
@@ -53,7 +56,12 @@ public class IncrementCauseCompanyStatsHandler implements RequestHandler<APIGate
             return response(500, "Internal error", e.getMessage());
         }
     }
-
+    private APIGatewayProxyResponseEvent response(int status, String body) {
+        return new APIGatewayProxyResponseEvent()
+                .withStatusCode(status)
+                .withHeaders(Map.of("Content-Type", "application/json"))
+                .withBody(body);
+    }
     private boolean incrementOrCreateCauseCompanyStatsRecord(String causeId, String companyId, String causeDesc,
                                                              String companyName, boolean increment) {
         try {
@@ -64,21 +72,26 @@ public class IncrementCauseCompanyStatsHandler implements RequestHandler<APIGate
                     "company_id", AttributeValue.fromS(companyId)
             );
 
-            Map<String, AttributeValue> expressionAttributeValues = Map.of(
-                    ":delta", AttributeValue.fromN(String.valueOf(adjustment)),
-                    ":zero", AttributeValue.fromN("0"),
-                    ":company_name", AttributeValue.fromS(companyName),
-                    ":cause_desc", AttributeValue.fromS(causeDesc)
-            );
+            Map<String, AttributeValue> expressionAttributeValues = new HashMap<>();
+            expressionAttributeValues.put(":delta", AttributeValue.fromN(String.valueOf(adjustment)));
+            expressionAttributeValues.put(":zero", AttributeValue.fromN("0"));
+
+            StringBuilder updateExpression = new StringBuilder("SET boycott_count = if_not_exists(boycott_count, :zero) + :delta");
+
+            if (increment) {
+                if (companyName == null || causeDesc == null) {
+                    throw new IllegalArgumentException("companyName and causeDesc are required when incrementing.");
+                }
+                expressionAttributeValues.put(":company_name", AttributeValue.fromS(companyName));
+                expressionAttributeValues.put(":cause_desc", AttributeValue.fromS(causeDesc));
+                updateExpression.append(", company_name = if_not_exists(company_name, :company_name)");
+                updateExpression.append(", cause_desc = if_not_exists(cause_desc, :cause_desc)");
+            }
 
             UpdateItemRequest request = UpdateItemRequest.builder()
                     .tableName("cause_company_stats")
                     .key(key)
-                    .updateExpression(
-                            "SET boycott_count = if_not_exists(boycott_count, :zero) + :delta, " +
-                                    "company_name = if_not_exists(company_name, :company_name), " +
-                                    "cause_desc = if_not_exists(cause_desc, :cause_desc)"
-                    )
+                    .updateExpression(updateExpression.toString())
                     .expressionAttributeValues(expressionAttributeValues)
                     .build();
 
@@ -90,7 +103,6 @@ public class IncrementCauseCompanyStatsHandler implements RequestHandler<APIGate
             throw e;
         }
     }
-
 
     private APIGatewayProxyResponseEvent response(int status, String message, String devMsg) {
         try {
