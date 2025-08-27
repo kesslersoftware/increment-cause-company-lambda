@@ -102,6 +102,6 @@ public class IncrementCauseCompanyStatsHandlerTest {
         APIGatewayProxyResponseEvent response = handler.handleRequest(event, context);
 
         assertEquals(500, response.getStatusCode());
-        assertTrue(response.getBody().contains("DB error"));
+        assertTrue(response.getBody().contains("Unexpected server error"));
     }
 }

@@ -7,6 +7,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent
 import com.boycottpro.causecompanystats.model.IncrementForm;
 import com.boycottpro.models.ResponseMessage;
 import com.boycottpro.utilities.JwtUtility;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
 
@@ -31,36 +32,39 @@ public class IncrementCauseCompanyStatsHandler implements RequestHandler<APIGate
 
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
+        String sub = null;
         try {
-            String sub = JwtUtility.getSubFromRestEvent(event);
-            if (sub == null) return response(401, "Unauthorized");
+            sub = JwtUtility.getSubFromRestEvent(event);
+            if (sub == null) return response(401, Map.of("message", "Unauthorized"));
             Map<String, String> pathParams = event.getPathParameters();
             String causeId = pathParams != null ? pathParams.get("cause_id") : null;
             String companyId = pathParams != null ? pathParams.get("company_id") : null;
-
             if (causeId == null || companyId == null) {
-                return response(400, "Missing cause_id or company_id", "Invalid path parameters.");
+                ResponseMessage message = new ResponseMessage(400,
+                        "Missing cause_id or company_id", "Invalid path parameters.");
+                return response(400,message);
             }
-
             IncrementForm form = objectMapper.readValue(event.getBody(), IncrementForm.class);
             boolean updated = incrementOrCreateCauseCompanyStatsRecord(causeId, companyId, form.getCause_desc(),
                     form.getCompany_name(), form.isIncrement());
-            String body = objectMapper.writeValueAsString(Map.of("recordUpdated", updated));
-            return new APIGatewayProxyResponseEvent()
-                    .withStatusCode(200)
-                    .withHeaders(Map.of("Content-Type", "application/json"))
-                    .withBody(body);
+            return response(200,Map.of("recordUpdated", updated));
 
         } catch (Exception e) {
-            e.printStackTrace();
-            return response(500, "Internal error", e.getMessage());
+            System.out.println(e.getMessage() + " for user " + sub);
+            return response(500,Map.of("error", "Unexpected server error: " + e.getMessage()) );
         }
     }
-    private APIGatewayProxyResponseEvent response(int status, String body) {
+    private APIGatewayProxyResponseEvent response(int status, Object body) {
+        String responseBody = null;
+        try {
+            responseBody = objectMapper.writeValueAsString(body);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
         return new APIGatewayProxyResponseEvent()
                 .withStatusCode(status)
                 .withHeaders(Map.of("Content-Type", "application/json"))
-                .withBody(body);
+                .withBody(responseBody);
     }
     private boolean incrementOrCreateCauseCompanyStatsRecord(String causeId, String companyId, String causeDesc,
                                                              String companyName, boolean increment) {
