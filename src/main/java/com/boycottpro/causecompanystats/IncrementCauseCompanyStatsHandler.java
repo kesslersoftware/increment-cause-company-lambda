@@ -7,6 +7,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent
 import com.boycottpro.causecompanystats.model.IncrementForm;
 import com.boycottpro.models.ResponseMessage;
 import com.boycottpro.utilities.JwtUtility;
+import com.boycottpro.utilities.Logger;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.*;
@@ -33,24 +34,43 @@ public class IncrementCauseCompanyStatsHandler implements RequestHandler<APIGate
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent event, Context context) {
         String sub = null;
+        int lineNum = 37;
         try {
             sub = JwtUtility.getSubFromRestEvent(event);
-            if (sub == null) return response(401, Map.of("message", "Unauthorized"));
+            if (sub == null) {
+            Logger.error(41, sub, "user is Unauthorized");
+            return response(401, Map.of("message", "Unauthorized"));
+            }
+            lineNum = 44;
             Map<String, String> pathParams = event.getPathParameters();
             String causeId = pathParams != null ? pathParams.get("cause_id") : null;
             String companyId = pathParams != null ? pathParams.get("company_id") : null;
             if (causeId == null || companyId == null) {
+                String errorMessage = "";
+                if(causeId == null && companyId == null) {
+                    errorMessage = "cause_id and company_id not present";
+                } else {
+                    if(causeId == null) {
+                        errorMessage = "cause_id not present";
+                    } else {
+                        errorMessage = "company_id not present";
+                    }
+                }
+                Logger.error(59, sub, errorMessage);
                 ResponseMessage message = new ResponseMessage(400,
                         "Missing cause_id or company_id", "Invalid path parameters.");
+                lineNum = 62;
                 return response(400,message);
             }
+            lineNum = 65;
             IncrementForm form = objectMapper.readValue(event.getBody(), IncrementForm.class);
             boolean updated = incrementOrCreateCauseCompanyStatsRecord(causeId, companyId, form.getCause_desc(),
                     form.getCompany_name(), form.isIncrement());
+            lineNum = 69;
             return response(200,Map.of("recordUpdated", updated));
 
         } catch (Exception e) {
-            System.out.println(e.getMessage() + " for user " + sub);
+            Logger.error(lineNum, sub, e.getMessage());
             return response(500,Map.of("error", "Unexpected server error: " + e.getMessage()) );
         }
     }
